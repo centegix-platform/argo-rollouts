@@ -32,7 +32,22 @@ func (c *rolloutContext) rolloutBlueGreen() error {
 		return err
 	}
 
-	if replicasetutil.CheckPodSpecChange(c.rollout, c.newRS) {
+	// Check if we should skip full reconciliation due to pod spec change
+	// For rollouts with analysis or manual promotion (autoPromotionEnabled=false), 
+	// we need to continue reconciliation to ensure pause and analysis runs are created.
+	skipReconciliation := replicasetutil.CheckPodSpecChange(c.rollout, c.newRS)
+	if skipReconciliation {
+		hasPrePromotionAnalysis := c.rollout.Spec.Strategy.BlueGreen.PrePromotionAnalysis != nil
+		hasPostPromotionAnalysis := c.rollout.Spec.Strategy.BlueGreen.PostPromotionAnalysis != nil
+		needsManualPromotion := c.rollout.Spec.Strategy.BlueGreen.AutoPromotionEnabled != nil && !*c.rollout.Spec.Strategy.BlueGreen.AutoPromotionEnabled
+		
+		// If the rollout has analysis or needs manual promotion, don't skip reconciliation
+		if hasPrePromotionAnalysis || hasPostPromotionAnalysis || needsManualPromotion {
+			skipReconciliation = false
+		}
+	}
+
+	if skipReconciliation {
 		return c.syncRolloutStatusBlueGreen(previewSvc, activeSvc)
 	}
 
